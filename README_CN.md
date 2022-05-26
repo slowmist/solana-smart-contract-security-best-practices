@@ -1,4 +1,4 @@
-# solana-smart-contract-security-best-practices
+# solana 智能合约安全最佳实践
 
 [![Twitter URL](https://img.shields.io/twitter/url/https/twitter.com/slowmist_team.svg?style=social&label=Follow%20%40SlowMist_Team)](https://twitter.com/slowmist_team)
 
