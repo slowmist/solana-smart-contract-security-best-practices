@@ -154,6 +154,19 @@ spl_token_transfer(TokenTransferParams {
 - Recommendation:  
 Hardcode sysvar key in the program and check when passing in.
 
+### Pyth oracle check
+- Severity: High
+- Description:  
+Pyth oracle price sometimes fails, we should take care to check its status.
+- Exploit Scenario:  
+```rust
+if pyth_price.agg.status != PriceStatus::Trading {
+    return Err(ErrorCode::InvalidPythConfig);
+}
+```
+- Recommendation:  
+Upgrade the Pyth sdk to the latest version.
+
 ## Case Analysis
 ### Sysvar system account not checked
 
