@@ -12,6 +12,7 @@
     - [PDA substitution check](#PDA-substitution-check)
     - [Missing signer/ownership check](#Missing-signerownership-check)
     - [Missing system account check](#Missing-system-account-check)
+    - [Pyth oracle check](#pyth-oracle-check)
   - [Case Analysis](#Case-Analysis)
     - [Sysvar system account not checked](#Sysvar-system-account-not-checked)
     - [The PDA account is used but the caller's account and the beneficiary's account are not checked](#The-PDA-account-is-used-but-the-callers-account-and-the-beneficiarys-account-are-not-checked)
