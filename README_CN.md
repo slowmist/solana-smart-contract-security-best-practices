@@ -189,6 +189,22 @@ spl_token_transfer(TokenTransferParams {
 
 可以硬编码 sysvar 的 key 到合约里，然后在系统账号使用时对其进行比较。
 
+### 缺少对 lamports 的检查
+
+- 严重性: 低
+- 描述: 
+  Solana 账号在删除时（lamports置为零），在交易未执行结束前仍然可以读取到账号里的数据，如果在读取账号数据前未检查 lamports 值，可能会导致意外发生。
+
+- 利用场景:
+暂无
+
+- 建议:
+```
+if **the_account_to_read.try_borrow_lamports()? > 0 {
+    //logic here
+}
+```
+
 ## 案例分析
 
 ### Sysvar 系统账号未检查
