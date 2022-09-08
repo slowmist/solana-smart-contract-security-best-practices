@@ -155,6 +155,22 @@ spl_token_transfer(TokenTransferParams {
 - Recommendation:  
 Hardcode sysvar key in the program and check when passing in.
 
+### Missing check for lamports
+
+- Severity: low
+- Description: 
+  When a Solana account is deleted (lamports set to zero), the data in the account can still be read before the transaction is completed, which could lead to an accident if the lamports value is not checked before the account data is read.
+
+- Use scenario:
+None
+
+- Suggestion:
+```rust
+if **the_account_to_read.try_borrow_lamports()? > 0 {
+    //logic here
+}
+```
+
 ### Pyth oracle check
 - Severity: High
 - Description:  
