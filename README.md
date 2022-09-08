@@ -12,6 +12,7 @@
     - [PDA substitution check](#PDA-substitution-check)
     - [Missing signer/ownership check](#Missing-signerownership-check)
     - [Missing system account check](#Missing-system-account-check)
+    - [Missing check for lamports](#Missing-check-for-lamports)
     - [Pyth oracle check](#pyth-oracle-check)
   - [Case Analysis](#Case-Analysis)
     - [Sysvar system account not checked](#Sysvar-system-account-not-checked)
