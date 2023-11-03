@@ -18,6 +18,7 @@
     + [Missing system account check](#missing-system-account-check)
     + [Missing check for lamports](#missing-check-for-lamports)
     + [Pyth oracle check](#pyth-oracle-check)
+    + [Timely state reset](#timely-state-reset)
   * [Attacks using the Anchor framework](#attacks-using-the-anchor-framework)
     + [Signer authorization](#signer-authorization)
     + [Account data matching](#account-data-matching)
@@ -251,6 +252,35 @@ if pyth_price.agg.status != PriceStatus::Trading {
 ```
 - Recommendation:  
 Upgrade the Pyth sdk to the latest version.
+
+
+### Timely state reset
+- Severity: High
+- Description:  
+Reset authority while change owner.
+- Exploit Scenario:  
+```rust
+if let COption::Some(authority) = new_authority {
+    account.owner = authority;
+} else {
+    return Err(TokenError::InvalidInstruction.into());
+}
+```
+- Recommendation:  
+```rust
+if let COption::Some(authority) = new_authority {
+    account.owner = authority;
+} else {
+    return Err(TokenError::InvalidInstruction.into());
+}
+
+account.delegate = COption::None;
+account.delegated_amount = 0;
+
+if account.is_native() {
+    account.close_authority = COption::None;
+}
+```
 
 
 ## Attacks using the Anchor framework
