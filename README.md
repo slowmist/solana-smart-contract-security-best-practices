@@ -2,6 +2,7 @@
 
 [![Twitter URL](https://img.shields.io/twitter/url/https/twitter.com/slowmist_team.svg?style=social&label=Follow%20%40SlowMist_Team)](https://twitter.com/slowmist_team)
 
+[[中文]](./README_CN.md)
 
   * [Common pitfalls of Solana smart contracts:](#common-pitfalls-of-solana-smart-contracts-)
     + [Integer overflow or underflow](#integer-overflow-or-underflow)
