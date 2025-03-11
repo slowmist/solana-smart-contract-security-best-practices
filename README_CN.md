@@ -2,20 +2,39 @@
 
 [![Twitter URL](https://img.shields.io/twitter/url/https/twitter.com/slowmist_team.svg?style=social&label=Follow%20%40SlowMist_Team)](https://twitter.com/slowmist_team)
 
-
-  - [Solana 智能合约常见问题:](#Solana-智能合约常见问题)
+  - [Solana 智能合约常见问题:](#solana-智能合约常见问题)
     - [数值溢出](#数值溢出)
     - [算术精度误差](#算术精度误差)
     - [未对返回错误进行处理](#未对返回错误进行处理)
     - [缺少对初始化函数的权限控制](#缺少对初始化函数的权限控制)
-    - [Account Owner 未检查](#Account-Owner-未检查)
-    - [PDA 账户检查](#PDA-账户检查)
+    - [Account Owner 未检查](#account-owner-未检查)
+    - [PDA 账户检查](#pda-账户检查)
     - [未对账户是否签名进行校验](#未对账户是否签名进行校验)
     - [缺少对 system account 的检查](#缺少对-system-account-的检查)
     - [缺少对 lamports 的检查](#缺少对-lamports-的检查)
+    - [Pyth预言机检查](#pyth预言机检查)
+    - [及时状态重置](#及时状态重置)
+  - [利用Anchor框架的攻击](#利用anchor框架的攻击)
+    - [签名者授权](#签名者授权)
+    - [账户数据匹配](#账户数据匹配)
+    - [所有者检查](#所有者检查)
+    - [类型伪装 cosplay](#类型伪装-cosplay)
+    - [初始化检查](#初始化检查)
+    - [任意 CPI](#任意-cpi)
+    - [重复的可变账户](#重复的可变账户)
+    - [碰撞种子规范化](#碰撞种子规范化)
+    - [PDA共享](#pda共享)
+    - [关闭账户](#关闭账户)
+    - [Sysvar地址检查](#sysvar地址检查)
+    - [账户重新加载](#账户重新加载)
   - [案例分析](#案例分析)
-    - [Sysvar 系统账号未检查](#Sysvar-系统账号未检查)
-    - [使用PDA账户但是未对调用执行者账户与收益者账户进行检查](#使用PDA账户但是未对调用执行者账户与收益者账户进行检查)
+    - [Sysvar 系统账号未检查](#sysvar-系统账号未检查)
+        - [漏洞示例](#漏洞示例)
+        - [防御代码](#防御代码)
+    - [使用PDA账户但是未对调用执行者账户与收益者账户进行检查](#使用pda账户但是未对调用执行者账户与收益者账户进行检查)
+        - [漏洞示例](#漏洞示例-1)
+        - [防御代码](#防御代码-1)
+  - [持续更新。。。](#持续更新)
 
 [[English]](./README.md)
 
@@ -205,6 +224,1007 @@ if **the_account_to_read.try_borrow_lamports()? > 0 {
     //logic here
 }
 ```
+
+### Pyth预言机检查
+
+- 严重性：高
+
+- 描述：
+
+Pyth预言机价格有时失败，我们应该小心检查其状态。
+
+- 利用场景：
+
+```rust
+if pyth_price.agg.status != PriceStatus::Trading {
+    return Err(ErrorCode::InvalidPythConfig);
+}
+```
+
+- 建议：
+
+升级Pyth sdk至最新版本。
+
+### 及时状态重置
+
+- 严重性：高
+
+- 描述：
+
+变更所有者时重置权限。
+
+- 利用场景：
+
+```rust
+if letOption C::Some(authority) = new_authority {
+    account.owner = authority;
+} else {
+    return Err(TokenError::InvalidInstruction.into());
+}
+```
+
+- 建议：
+
+```rust
+if let COption::Some(authority) = new_authority {
+    account.owner = authority;
+} else {
+    return Err(TokenError::InvalidInstruction.into());
+}
+account.delegate = COption::None;
+account.delegated_amount = 0;
+if account.is_native() {
+    account.close_authority = COption::None;
+}
+```
+
+## 利用Anchor框架的攻击
+
+### 签名者授权
+
+- 严重性：高
+
+- 描述：
+
+签名者检查是为了确保发起执行调用的角色是经过认证的。
+
+- 利用场景：
+
+账户缺少签名者检查。
+
+```rust
+#[program]
+pub mod signer_authorization_insecure {
+    use super::*;
+    pub fn log_message(ctx: Context<LogMessage>) -> ProgramResult {
+        msg!("GM {}", ctx.accounts.authority.key().to_string());
+        Ok(())
+    }
+}
+#[derive(Accounts)]
+pub struct LogMessage<'info> {
+    authority: AccountInfo<'info>,
+}
+```
+
+- 建议：
+
+```rust
+#[program]
+pub mod signer_authorization_secure {
+    use super::*;
+    pub fn log_message(ctx: Context<LogMessage>) -> ProgramResult {
+        if !ctx.accounts.authority.is_signer {
+            return Err(ProgramError::MissingRequiredSignature);
+        }
+        msg!("GM {}", ctx.accounts.authority.key().to_string());
+        Ok(())
+    }
+}
+#[derive(Accounts)]
+pub struct LogMessage<'info> {
+    authority: AccountInfo<'info>,
+}
+```
+
+### 账户数据匹配
+
+- 严重性：高
+
+- 描述：
+
+在审计过程中，重点关注从Account的元数据解析出的数据结构。特别注意与权限相关的检查，如代币所有权和代币铸造权威。
+
+- 利用场景：
+
+```rust
+#[program]
+pub mod account_data_matching_insecure {
+    use super::*;
+    pub fn log_message(ctx: Context<LogMessage>) -> ProgramResult {
+        let token = SplTokenAccount::unpack(&ctx.accounts.token.data.borrow())?;
+        msg!("Your account balance is: {}", token.amount);
+        Ok(())
+    }
+}
+#[derive(Accounts)]
+pub struct LogMessage<'info> {
+    token: AccountInfo<'info>,
+    authority: Signer<'info>,
+}
+```
+
+- 建议：
+
+```rust
+#[program]
+pub mod account_data_matching_secure {
+    use super::*;
+    pub fn log_message(ctx: Context<LogMessage>) -> ProgramResult {
+        let token = SplTokenAccount::unpack(&ctx.accounts.token.data.borrow())?;
+        if ctx.accounts.authority.key != &token.owner {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        msg!("Your acocunt balance is: {}", token.amount);
+        Ok(())
+    }
+}
+#[derive(Accounts)]
+pub struct LogMessage<'info> {
+    token: AccountInfo<'info>,
+    authority: Signer<'info>,
+}
+```
+
+### 所有者检查
+
+- 严重性：高
+
+- 描述：
+
+所有者检查有两种形式：
+
+1. 第一种类型涉及检查Account的元数据中的Owner字段，例如验证SPL代币的所有者。
+
+2. 第二种类型是对Account本身的所有者检查。通常，在PDA（程序派生账户）的情况下，所有者是在派生过程中使用的程序ID。然而，需要注意的是，程序可以在派生过程中将所有者更改为另一个程序ID，并且只有Account的所有者可以操作Account的数据。
+
+在审计过程中，确定应用哪种所有者检查取决于程序的业务逻辑。
+
+- 利用场景：
+
+```rust
+#[program]
+pub mod owner_checks_insecure {
+    use super::*;
+    pub fn log_message(ctx: Context<LogMessage>) -> ProgramResult {
+        let token = SplTokenAccount::unpack(&ctx.accounts.token.data.borrow())?;
+        if ctx.accounts.authority.key != &token.owner {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        msg!("Your account balance is: {}", token.amount);
+        Ok(())
+    }
+}
+#[derive(Accounts)]
+pub struct LogMessage<'info> {
+    token: AccountInfo<'info>,
+    authority: Signer<'info>,
+}
+```
+
+- 建议：
+
+```rust
+#[program]
+pub mod owner_checks_secure {
+    use super::*;
+    pub fn log_message(ctx: Context<LogMessage>) -> ProgramResult {
+        let token = SplTokenAccount::unpack(&ctx.accounts.token.data.borrow())?;
+        if ctx.accounts.token.owner != &spl_token::ID {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        if ctx.accounts.authority.key != &token.owner {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        msg!("Your account balance is: {}", token.amount);
+        Ok(())
+    }
+}
+#[derive(Accounts)]
+pub struct LogMessage<'info> {
+    token: AccountInfo<'info>,
+    authority: Signer<'info>,
+}
+```
+
+### 类型伪装 cosplay
+
+- 严重性：高
+
+- 描述：
+
+在审计过程中，识别程序中共享相同数据结构的账户。尝试推断这些不同账户可能通过使用相同的数据结构相互伪装的风险。
+
+- 利用场景：
+
+```rust
+#[program]
+
+pub mod type_cosplay_insecure {
+
+use super::*;
+
+pub fn update_user(ctx: Context<UpdateUser>) -> ProgramResult {
+
+let user = User::try_from_slice(&ctx.accounts.user.data.borrow()).unwrap();
+
+if ctx.accounts.user.owner != ctx.program_id {
+
+return Err(ProgramError::IllegalOwner);
+
+}
+
+if user.authority != ctx.accounts.authority.key() {
+
+return Err(ProgramError::InvalidAccountData);
+
+}
+
+msg!("GM {}", user.authority);
+
+Ok(())
+
+}
+
+}
+
+#[derive(Accounts)]
+
+pub struct UpdateUser<'info> {
+
+user: AccountInfo<'info>,
+
+authority: Signer<'info>,
+
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+
+pub struct User {
+
+authority: Pubkey,
+
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+
+pub struct Metadata {
+
+account: Pubkey,
+
+}
+
+```
+
+- 建议：
+
+```rust
+
+#[program]
+
+pub mod type_cosplay_secure {
+
+use super::*;
+
+pub fn update_user(ctx: Context<UpdateUser>) -> ProgramResult {
+
+let user = User::try_from_slice(&ctx.accounts.user.data.borrow()).unwrap();
+
+if ctx.accounts.user.owner != ctx.program_id {
+
+return Err(ProgramError::IllegalOwner);
+
+}
+
+if user.authority != ctx.accounts.authority.key() {
+
+return Err(ProgramError::InvalidAccountData);
+
+}
+
+if user.discriminant != AccountDiscriminant::User {
+
+return Err(ProgramError::InvalidAccountData);
+
+}
+
+msg!("GM {}", user.authority);
+
+Ok(())
+
+}
+
+}
+
+#[derive(Accounts)]
+
+pub struct UpdateUser<'info> {
+
+user: AccountInfo<'info>,
+
+authority: Signer<'info>,
+
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+
+pub struct User {
+
+discriminant: AccountDiscriminant,
+
+authority: Pubkey,
+
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+
+pub struct Metadata {
+
+discriminant: AccountDiscriminant,
+
+account: Pubkey,
+
+}
+
+#[derive(BorshSerialize, BorshDeserialize, PartialEq)]
+
+pub enum AccountDiscriminant {
+
+User,
+
+Metadata,
+
+}
+```
+
+### 初始化检查
+
+- 严重性：高
+
+- 描述：
+
+在商业环境中，当数据应该只被初始化一次时，使用一个标志来检查它是否已经被设置为“真”是至关重要的。
+
+- 利用场景：
+
+```rust
+
+#[program]
+
+pub mod initialization_insecure {
+
+use super::*;
+
+pub fn initialize(ctx: Context<Initialize>) -> ProgramResult {
+
+let mut user = User::try_from_slice(&ctx.accounts.user.data.borrow()).unwrap();
+
+user.authority = ctx.accounts.authority.key();
+
+let mut storage = ctx.accounts.user.try_borrow_mut_data()?;
+
+user.serialize(storage.deref_mut()).unwrap();
+
+Ok(())
+
+}
+
+}
+
+/*
+
+- 重新初始化
+
+- 创建且不初始化
+
+- 从其他程序传递先前初始化的账户
+
+(例如：代币程序 => 需要检查代理人和权限)
+
+*/
+
+#[derive(Accounts)]
+
+pub struct Initialize<'info> {
+
+user: AccountInfo<'info>,
+
+authority: Signer<'info>,
+
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+
+pub struct User {
+
+authority: Pubkey,
+
+}
+
+```
+
+- 建议：
+
+```rust
+
+#[program]
+
+pub mod reinitialization_secure_recommended {
+
+use super::*;
+
+pub fn initialize(ctx: Context<Initialize>) -> ProgramResult {
+
+let mut user = User::try_from_slice(&ctx.accounts.user.data.borrow()).unwrap();
+
+if !user.discriminator {
+
+return Err(ProgramError::InvalidAccountData);
+
+}
+
+user.authority = ctx.accounts.authority.key();
+
+user.discriminator = true;
+
+let mut storage = ctx.accounts.user.try_borrow_mut_data()?;
+
+user.serialize(storage.deref_mut()).unwrap();
+
+msg!("GM");
+
+Ok(())
+
+}
+
+}
+
+#[derive(Accounts)]
+
+pub struct Initialize<'info> {
+
+user: AccountInfo<'info>,
+
+authority: Signer<'info>,
+
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+
+pub struct User {
+
+discriminator: bool,
+
+authority: Pubkey,
+
+}
+
+```
+
+### 任意 CPI
+
+- 严重性：高
+
+- 描述：
+
+在审计过程中，重要的是要定位程序中的 CPI（跨程序调用）代码逻辑，并确保代码在进行 CPI 时包含对目标程序 ID 的检查。这对于验证目标程序的合法性至关重要。
+
+- 利用场景：
+
+```rust
+#[program]
+pub mod arbitrary_cpi_insecure {
+    use super::*;
+    pub fn cpi(ctx: Context<Cpi>, amount: u64) -> ProgramResult {
+        solana_program::program::invoke(
+            &spl_token::instruction::transfer(
+                ctx.accounts.token_program.key,
+                ctx.accounts.source.key,
+                ctx.accounts.destination.key,
+                ctx.accounts.authority.key,
+                &[],
+                amount,
+            )?,
+            &[
+                ctx.accounts.source.clone(),
+                ctx.accounts.destination.clone(),
+                ctx.accounts.authority.clone(),
+            ],
+        )
+    }
+}
+
+#[derive(Accounts)]
+pub struct Cpi<'info> {
+    source: AccountInfo<'info>,
+    destination: AccountInfo<'info>,
+    authority: AccountInfo<'info>,
+    token_program: AccountInfo<'info>,
+}
+```
+
+- 建议：
+
+```rust
+#[program]
+pub mod arbitrary_cpi_secure {
+    use super::*;
+    pub fn cpi_secure(ctx Context:<Cpi>, amount: u64) -> ProgramResult {
+        if &spl_token::ID != ctx.accounts.token_program.key {
+            return Err(ProgramError::IncorrectProgramId);
+        }
+        solana_program::program::invoke(
+            &spl_token::instruction::transfer(
+                ctx.accounts.token_program.key,
+                ctx.accounts.source.key,
+                ctx.accounts.destination.key,
+                ctx.accounts.authority.key,
+                &[],
+                amount,
+            )?,
+            &[
+                ctx.accounts.source.clone(),
+                ctx.accounts.destination.clone(),
+                ctx.accounts.authority.clone(),
+            ],
+        )
+    }
+}
+
+#[derive(Accounts)]
+pub struct Cpi<'info> {
+    source: AccountInfo<'info>,
+    destination: AccountInfo<'info>,
+    authority: AccountInfo<'info>,
+    token_program: AccountInfo<'info>,
+}
+```
+
+### 重复的可变账户
+
+- 严重性：高
+
+- 描述：
+
+在审计过程中，重要的是要注意传递相同的 Account 作为输入是否可能导致意外的数据覆盖。
+
+- 利用场景：
+
+这两个账户都是可变的，并且可能是同一个账户。
+
+```rust
+#[program]
+pub mod duplicate_mutable_accounts_insecure {
+    use super::*;
+    pub fn update(ctx: Context<Update>, a: u64, b: u64) -> ProgramResult {
+        let user_a = &mut ctx.accounts.user_a;
+        let user_b = &mut ctx.accounts.user_b;
+        user_a.data = a;
+        user_b.data = b;
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct Update<'info> {
+    user_a: Account<'info, User>,
+    user_b: Account<'info, User>,
+}
+
+#[account]
+pub struct User {
+    data: u64,
+}
+```
+
+- 建议：
+
+```rust
+#[program]
+pub mod duplicate_mutable_accounts_secure {
+    use super::*;
+    pub fn update(ctx: Context<Update>, a: u64, b: u64) -> ProgramResult {
+        if ctx.accounts.user_a.key() == ctx.accounts.user_b.key() {
+            return Err(ProgramError::InvalidArgument)
+        }
+        let user_a = &mut ctx.accounts.user_a;
+        let user_b = &mut ctx.accounts.user_b;
+        user_a.data = a;
+        user_b.data = b;
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct Update<'info> {
+    user_a: Account<'info, User>,
+    user_b: Account<'info, User>,
+}
+
+#[account]
+pub struct User {
+    data: u64,
+}
+```
+
+### 碰撞种子规范化
+
+- 严重性：高
+
+- 描述：
+
+"create_program_address" 和 "find_program_address" 之间存在显著差异。"create_program_address" 如果碰撞种子（bump seed）不同，即使对于相同的程序ID，也会生成不同的PDA（Program Derived Address）， "而find_program_address" 使用最大有效碰撞种子返回PDA。因此，如果不应用碰撞种子验证，并且碰撞种子是不可信任的数据，可能会导致后续代码逻辑中的安全问题。
+
+- 利用场景：
+
+```rust
+#[program]
+pub mod bump_seed_canonicalization_insecure {
+use super::*;
+
+pub fn set_value(ctx: Context<BumpSeed>, key: u64, new_value: u64, bump: u8) -> ProgramResult {
+    let address = Pubkey::create_program_address(&[key.to_le_bytes().as_ref(), &[bump]], ctx.program_id)?;
+    if address != ctx.accounts.data.key() {
+        return Err(ProgramError::InvalidArgument);
+    }
+    ctx.accounts.data.value = new_value;
+    Ok(())
+}
+}
+
+#[derive(Accounts)]
+pub struct BumpSeed<'info> {
+    data: Account<'info, Data>,
+}
+
+#[account]
+pub struct Data {
+    value: u64,
+}
+```
+
+- 建议：
+
+```rust
+#[program]
+pub mod bump_seed_canonicalization_secure {
+use super::*;
+
+pub fn set_value_secure(
+    ctx: Context<BumpSeed>,
+    key: u64,
+    new_value: u64,
+    bump: u8,
+) -> ProgramResult {
+    let (address, expected_bump) = Pubkey::find_program_address(&[key.to_le_bytes().as_ref()], ctx.program_id);
+    if address != ctx.accounts.data.key() {
+        return Err(ProgramError::InvalidArgument);
+    }
+    if expected_bump != bump {
+        return Err(ProgramError::InvalidArgument);
+    }
+    ctx.accounts.data.value = new_value;
+    Ok(())
+}
+}
+
+#[derive(Accounts)]
+pub struct BumpSeed<'info> {
+    data: Account<'info, Data>,
+}
+
+#[account]
+pub struct Data {
+    value: u64,
+}
+```
+
+### PDA共享
+
+- 严重性：高
+
+- 描述：
+
+在审计过程中，检查与CPI（跨程序调用）相关的代码至关重要，以确保调用具有不同角色的PDA时权限分离。这有助于防止多个角色共享相同的种子。
+
+- 利用场景：
+
+```rust
+#[program]
+pub mod pda_sharing_insecure {
+use super::*;
+
+pub fn withdraw_tokens(ctx: Context<WithdrawTokens>) -> ProgramResult {
+    let amount = ctx.accounts.vault.amount;
+    let seeds = &[ctx.accounts.pool.mint.as_ref(), &[ctx.accounts.pool.bump]];
+    token::transfer(ctx.accounts.transfer_ctx().with_signer(&[seeds]), amount)
+}
+}
+
+#[derive(Accounts)]
+pub struct WithdrawTokens<'info> {
+    #[account(has_one = vault, has_one = withdraw_destination)]
+    pool: Account<'info, TokenPool>,
+    vault: Account<'info, TokenAccount>,
+    withdraw_destination: Account<'info, TokenAccount>,
+    authority: Signer<'info>,
+    token_program: Program<'info, Token>,
+}
+
+impl<'info> WithdrawTokens<'info> {
+    pub fn transfer_ctx(&self) -> CpiContext<'_, '_, '_, 'info, token::Transfer<'info>> {
+        let program = self.token_program.to_account_info();
+        let accounts = token::Transfer {
+ from           : self.vault.to_account_info(),
+            to: self.withdraw_destination.to_account_info(),
+            authority: self.authority.to_account_info(),
+        };
+        CpiContext::new(program, accounts)
+    }
+}
+
+#[account]
+pub struct TokenPool {
+    vault: Pubkey,
+    mint: Pubkey,
+    withdraw_destination: Pubkey,
+    bump: u8,
+}
+```
+
+- 建议：
+
+```rust
+#[program]
+pub mod pda_sharing_secure {
+    use super::*;
+
+    pub fn withdraw_tokens(ctx: Context<WithdrawTokens>) -> ProgramResult {
+        let amount = ctx.accounts.vault.amount;
+        let seeds = &[
+            ctx.accounts.pool.withdraw_destination.as_ref(),
+            &[ctx.accounts.pool.bump],
+        ];
+        token::transfer(ctx.accounts.transfer_ctx().with_signer(&[seeds]), amount)
+    }
+}
+
+#[derive(Accounts)]
+pub struct WithdrawTokens<'info> {
+    #[account(has_one = vault, has_one = withdraw_destination)]
+    pool: Account<'info, TokenPool>,
+    vault: Account<'info, TokenAccount>,
+    withdraw_destination: Account<'info, TokenAccount>,
+    authority: Signer<'info>,
+    token_program: Program<'info, Token>,
+}
+
+impl<'info> WithdrawTokens<'info> {
+    pub fn transfer_ctx(&self) -> CpiContext<'_, '_, '_, 'info, token::Transfer<'info>> {
+        let program = self.token_program.to_account_info();
+        let accounts = token::Transfer {
+            from: self.vault.to_account_info(),
+            to: self.withdraw_destination.to_account_info(),
+            authority: self.authority.to_account_info(),
+        };
+        CpiContext::new(program, accounts)
+    }
+}
+
+#[account]
+pub struct TokenPool {
+    vault: Pubkey,
+    mint: Pubkey,
+    withdraw_destination: Pubkey,
+    bump: u8,
+}
+```
+
+### 关闭账户
+
+- 严重性：高
+
+- 描述：
+
+审计在过程中，如果程序代码包含关闭账户的功能，需要注意以下几点：
+
+1. 转移账户的lamports后，应该用CLOSED_ACCOUNT_DISCRIMINATOR数据填充。
+
+2. 在程序的其他函数中，应该有检查以防止调用与填充了CLOSED_ACCOUNT_DISCRIMINATOR的账户相关的函数。
+
+- 漏洞场景：
+
+```rust
+#[program]
+pub mod closing_accounts_insecure {
+    use super::*;
+    pub fn close(ctx: Context<Close>) -> ProgramResult {
+        let dest_starting_lamports = ctx.accounts.destination.lamports();
+        **ctx.accounts.destination.lamports.borrow_mut() = dest_starting_lamports
+            .checked_add(ctx.accounts.account.to_account_info().lamports())
+            .unwrap();
+        **ctx.accounts.account.to_account_info().lamports.borrow_mut() = 0;
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct Close<'info> {
+    account: Account<'info, Data>,
+    destination: AccountInfo<'info>,
+}
+
+#[account]
+pub struct Data {
+    data: u64,
+}
+```
+
+- 建议：
+
+```rust
+#[program]
+pub mod closing_accounts_secure {
+    use super::*;
+    pub fn close(ctx: Context<Close>) -> ProgramResult {
+        let dest_starting_lamports = ctx.accounts.destination.lamports();
+        let account = ctx.accounts.account.to_account_info();
+        **ctx.accounts.destination.lamports.borrow_mut() = dest_starting_lamports
+            .checked_add(account.lamports())
+            .unwrap();
+        **account.lamports.borrow_mut() = 0;
+        let mut data = account.try_borrow_mut_data()?;
+        for byte in data.deref_mut().iter_mut() {
+            *byte = 0;
+        }
+        let dst: &mut [u8] = &mut data;
+        let mut cursor = Cursor::new(dst);
+        cursor.write_all(&CLOSED_ACCOUNT_DISCRIMINATOR).unwrap();
+        Ok(())
+    }
+
+    pub fn force_defund(ctx: Context<ForceDefund>) -> ProgramResult {
+        let account = &ctx.accounts.account;
+        let data = account.try_borrow_data()?;
+        assert!(data.len() > 8);
+        let mut discriminator = [0u8; 8];
+        discriminator.copy_from_slice(&data[0..8]);
+        if discriminator != CLOSED_ACCOUNT_DISCRIMINATOR {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        let dest_starting_lamports = ctx.accounts.destination.lamports();
+        **ctx.accounts.destination.lamports.borrow_mut() = dest_starting_lamports
+            .checked_add(account.lamports())
+            .unwrap();
+        **account.lamports.borrow_mut() = 0;
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct Close<'info> {
+    account: Account<'info, Data>,
+    destination: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ForceDefund<'info> {
+    account: AccountInfo<'info>,
+    destination: AccountInfo<'info>,
+}
+
+#[account]
+pub struct Data {
+    data: u64,
+}
+```
+
+### Sysvar地址检查
+
+- 严重性：高
+
+- 描述：
+
+系统账户可能被伪造账户替换。
+
+- 漏洞场景：
+
+```rust
+#[program]
+pub mod insecure {
+    use super::*;
+    pub fn check_sysvar_address(ctx: Context<CheckSysvarAddress>) -> Result<()> {
+        msg!("Rent Key -> {}", ctx.accounts.rent.key().to_string());
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct CheckSysvarAddress<'info> {
+    rent: AccountInfo<'info>,
+}
+```
+
+- 建议：
+
+```rust
+#[program]
+pub mod secure {
+    use super::*;
+    pub fn check_sysvar_address(ctx: Context<CheckSysvarAddress>) -> Result<()> {
+        require_eq!(ctx.accounts.rent.key(), sysvar::rent::ID);
+        msg!("Rent Key -> {}", ctx.accounts.rent.key().to_string());
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct CheckSysvarAddress<'info> {
+    rent: AccountInfo<'info>,
+}
+```
+
+### 账户重新加载
+
+- 严重性：高
+
+- 描述：
+
+CPIs可能引入的问题不止于此。虽然Anchor会自动为你做很多事情，但它不会在CPI之后更新反序列化的账户。
+
+例如，假设你有一个Mint账户，并且你即将为调用者铸造一些代币，以便他们跟踪他们对流动性池的贡献。你执行一个CPI到代币程序来铸造这些代币，然后读取Mint账户的当前供应量以供稍后计算。然而，直观上，你可能会期望供应量是准确的，Anchor中的账户在CPI之后不会更新他们的数据！
+
+- 利用场景：
+
+```rust
+
+let authority_seeds = /* seeds */;
+
+let mint_to = MintTo {
+
+mint: self.liquidity_mint.to_account_info(),
+
+to: self.user.to_account_info(),
+
+authority: self.liquidityint_m_authority.to_account_info()
+
+};
+
+msg!("供应前: {}", self.liquidity_mint.supply);
+
+anchor_spl::token::mint_to(
+
+CpiContext::new_with_signer(
+
+self.token_program.to_account_info(),
+
+mint_to,
+
+authority_seeds
+
+),
+
+amount
+
+)?;
+
+msg!("供应后: {}", self.liquidity_mint.supply); // 保持不变！
+
+```
+
+- 建议：
+
+为了获得预期的行为，请确保在账户上调用Anchor的reload方法。这将用当前底层数据刷新结构体的字段。
 
 ## 案例分析
 
