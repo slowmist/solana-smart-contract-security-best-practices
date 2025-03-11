@@ -31,6 +31,7 @@
     + [Pda sharing](#pda-sharing)
     + [Closing accounts](#closing-accounts)
     + [Sysvar address checking](#sysvar-address-checking)
+    + [Account Reloading](#account-reloading)
   * [Case Analysis](#case-analysis)
 
 
@@ -281,7 +282,6 @@ if account.is_native() {
     account.close_authority = COption::None;
 }
 ```
-
 
 ## Attacks using the Anchor framework
 
@@ -1041,6 +1041,43 @@ pub struct CheckSysvarAddress<'info> {
     rent: AccountInfo<'info>,
 }
 ```
+
+
+### Account Reloading
+- Severity: High
+- Description:  
+The problems CPIs can introduce do not end there. While Anchor does a lot for you automatically, one thing it doesn’t do is update deserialized accounts after a CPI.
+
+For example, imagine you have a Mint account and are just about to mint some token for the caller to track their contribution to a liquidity pool. You perform a CPI to the token program to mint these tokens and then read the current supply from the Mint account for a calculation later on. While, intuitively, you might expect the supply to be accurate, accounts in Anchor don’t update their data after a CPI!
+- Exploit Scenario:  
+```rust
+let authority_seeds = /* seeds */;
+
+let mint_to = MintTo {
+    mint: self.liquidity_mint.to_account_info(),
+    to: self.user.to_account_info(),
+    authority: self.liquidity_mint_authority.to_account_info()
+};
+
+msg!("Supply before: {}", self.liquidity_mint.supply);
+
+anchor_spl::token::mint_to(
+    CpiContext::new_with_signer(
+        self.token_program.to_account_info(),
+        mint_to,
+        authority_seeds
+    ),
+    amount
+)?;
+
+msg!("Supply after: {}", self.liquidity_mint.supply); // stays the same!
+```
+
+
+- Recommendation:  
+To get the expected behavior, make sure to call Anchor’s reload method on the account. This will refresh the struct’s fields with the current underlying data.
+
+
 
 ## Case Analysis
 ### Sysvar system account not checked
