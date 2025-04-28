@@ -1125,7 +1125,7 @@ pub fn verify_signatures(
 
 - Related Events
 
-[Solana跨链桥虫洞协议(Wormhole Protocal)攻击事件](https://mp.weixin.qq.com/s/x39VlJM0tKQ7r8Xzzo25gQ)
+[Solana Cross-Chain Bridge Wormhole Protocol Attack Incident](https://mp.weixin.qq.com/s/x39VlJM0tKQ7r8Xzzo25gQ)
 
 ### The PDA account is used but the caller's account and the beneficiary's account are not checked
 
@@ -1291,6 +1291,6 @@ impl<'info> WithdrawTokens<'info> {
 
 - Related Events
 
-[Jet Protocol 任意提款漏洞](https://mp.weixin.qq.com/s/Hxvaz8u21p94ChxCshIftA)
+[Jet Protocol arbitrary withdrawal vulnerability](https://mp.weixin.qq.com/s/Hxvaz8u21p94ChxCshIftA)
 
 ## Continuous update. . .
